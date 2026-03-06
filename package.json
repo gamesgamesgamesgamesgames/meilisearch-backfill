@@ -1,0 +1,12 @@
+{
+  "name": "meilisearch-backfill",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx meilisearch-backfill.ts"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5",
+    "tsx": "^4.19.0"
+  }
+}
