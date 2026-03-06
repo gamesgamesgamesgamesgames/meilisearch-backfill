@@ -92,12 +92,20 @@ async function meiliTask(
 async function configureIndex(): Promise<void> {
   console.log("Configuring index settings...");
 
-  // Create index if it doesn't exist
-  const result = (await meili("/indexes", "POST", {
-    uid: INDEX,
-    primaryKey: "id",
-  })) as { taskUid: number };
-  await waitForTask(result.taskUid);
+  // Create index if it doesn't exist (ignore "already exists" errors)
+  try {
+    const result = (await meili("/indexes", "POST", {
+      uid: INDEX,
+      primaryKey: "id",
+    })) as { taskUid: number };
+    await waitForTask(result.taskUid);
+  } catch (err) {
+    if (String(err).includes("already exists")) {
+      console.log("  Index already exists, continuing...");
+    } else {
+      throw err;
+    }
+  }
 
   // Filterable attributes — enables faceted search and filter queries
   await meiliTask(`/indexes/${INDEX}/settings/filterable-attributes`, "PUT", [
