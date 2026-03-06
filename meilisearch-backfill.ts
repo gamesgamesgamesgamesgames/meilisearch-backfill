@@ -206,6 +206,11 @@ async function configureIndex(): Promise<void> {
 
 type Record = { [key: string]: unknown };
 
+/** Base64url-encode an AT URI for use as a Meilisearch document ID. */
+function toDocId(uri: string): string {
+  return Buffer.from(uri).toString("base64url");
+}
+
 const COLLECTIONS: { [collection: string]: string } = {
   "games.gamesgamesgamesgames.game": "game",
   "games.gamesgamesgamesgames.platform": "platform",
@@ -238,7 +243,7 @@ function mapRecord(
         }
       }
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "game",
         did,
         uri,
@@ -260,7 +265,7 @@ function mapRecord(
     }
     case "platform":
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "platform",
         did,
         uri,
@@ -273,7 +278,7 @@ function mapRecord(
       };
     case "collection":
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "collection",
         did,
         uri,
@@ -284,7 +289,7 @@ function mapRecord(
       };
     case "engine":
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "engine",
         did,
         uri,
@@ -294,7 +299,7 @@ function mapRecord(
       };
     case "actorProfile":
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "profile",
         profileType: "actor",
         did,
@@ -307,7 +312,7 @@ function mapRecord(
       };
     case "orgProfile":
       return {
-        id: uri,
+        id: toDocId(uri),
         type: "profile",
         profileType: "org",
         did,
