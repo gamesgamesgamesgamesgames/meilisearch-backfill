@@ -188,7 +188,7 @@ async function configureIndex(): Promise<void> {
   ]);
 
   // Typo tolerance — tuned for game names
-  await meiliTask(`/indexes/${INDEX}/settings/typo-tolerance`, "PUT", {
+  await meiliTask(`/indexes/${INDEX}/settings/typo-tolerance`, "PATCH", {
     enabled: true,
     minWordSizeForTypos: {
       oneTypo: 4,
