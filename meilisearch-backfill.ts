@@ -128,6 +128,7 @@ async function configureIndex(): Promise<void> {
     "name",
     "displayName",
     "publishedAt",
+    "firstReleaseDate",
   ]);
 
   // Searchable attributes — priority order (most important first)
@@ -177,7 +178,7 @@ async function configureIndex(): Promise<void> {
     platformer: ["platform"],
   });
 
-  // Ranking rules — boost exact name matches
+  // Ranking rules — boost exact name matches, then prefer newer games
   await meiliTask(`/indexes/${INDEX}/settings/ranking-rules`, "PUT", [
     "words",
     "typo",
@@ -185,6 +186,7 @@ async function configureIndex(): Promise<void> {
     "attribute",
     "sort",
     "exactness",
+    "firstReleaseDate:desc",
   ]);
 
   // Typo tolerance — tuned for game names
@@ -209,6 +211,62 @@ type Record = { [key: string]: unknown };
 /** Base64url-encode an AT URI for use as a Meilisearch document ID. */
 function toDocId(uri: string): string {
   return Buffer.from(uri).toString("base64url");
+}
+
+/**
+ * Parse a releasedAt string into a numeric YYYYMMDD value for sorting.
+ * Handles: "YYYY-MM-DD", "YYYY-MM", "YYYY-Q1".."YYYY-Q4", "YYYY".
+ * Returns undefined for "TBD" or unparseable values.
+ */
+const Q_MONTH: { [key: string]: number } = { Q1: 1, Q2: 4, Q3: 7, Q4: 10 };
+
+function parseReleaseDate(s: unknown): number | undefined {
+  if (typeof s !== "string" || s === "TBD") return undefined;
+
+  // YYYY-Qn
+  const qMatch = s.match(/^(\d{4})-?(Q[1-4])$/);
+  if (qMatch) {
+    return Number(qMatch[1]) * 10000 + Q_MONTH[qMatch[2]] * 100 + 1;
+  }
+
+  // YYYY-MM-DD
+  const fullMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (fullMatch) {
+    return Number(fullMatch[1]) * 10000 + Number(fullMatch[2]) * 100 + Number(fullMatch[3]);
+  }
+
+  // YYYY-MM
+  const monthMatch = s.match(/^(\d{4})-(\d{2})$/);
+  if (monthMatch) {
+    return Number(monthMatch[1]) * 10000 + Number(monthMatch[2]) * 100 + 1;
+  }
+
+  // YYYY
+  const yearMatch = s.match(/^(\d{4})$/);
+  if (yearMatch) {
+    return Number(yearMatch[1]) * 10000 + 101;
+  }
+
+  return undefined;
+}
+
+/** Find the earliest release date across all platforms/regions. */
+function getFirstReleaseDate(releases: unknown): number | undefined {
+  if (!Array.isArray(releases)) return undefined;
+  let earliest: number | undefined;
+  for (const rel of releases) {
+    if (!rel || typeof rel !== "object") continue;
+    const releaseDates = (rel as Record).releaseDates;
+    if (!Array.isArray(releaseDates)) continue;
+    for (const rd of releaseDates) {
+      if (!rd || typeof rd !== "object") continue;
+      const val = parseReleaseDate((rd as Record).releasedAt);
+      if (val !== undefined && (earliest === undefined || val < earliest)) {
+        earliest = val;
+      }
+    }
+  }
+  return earliest;
 }
 
 const COLLECTIONS: { [collection: string]: string } = {
@@ -259,6 +317,7 @@ function mapRecord(
         multiplayerModes: record.multiplayerModes,
         applicationType: record.applicationType,
         publishedAt: record.publishedAt,
+        firstReleaseDate: getFirstReleaseDate(record.releases),
         media: record.media,
         ...(slug ? { slug } : {}),
       };
