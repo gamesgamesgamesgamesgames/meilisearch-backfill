@@ -397,7 +397,6 @@ function mapRecord(
         description: record.description,
         pronouns: record.pronouns,
         avatar: record.avatar,
-        ...(slug ? { slug } : {}),
       };
     case "orgProfile":
       return {
@@ -411,7 +410,6 @@ function mapRecord(
         country: record.country,
         status: record.status,
         avatar: record.avatar,
-        ...(slug ? { slug } : {}),
       };
     default:
       return null;
@@ -425,18 +423,14 @@ function mapRecord(
 async function backfill(): Promise<void> {
   const sql = postgres(DATABASE_URL);
 
-  // Load all slug records into a map: ref → slug
+  // Load all slugs from the slugs table into a map: uri → slug
   console.log("Loading slugs...");
   const slugRows = await sql`
-    SELECT record->>'ref' AS ref, record->>'slug' AS slug
-    FROM records
-    WHERE collection = 'games.gamesgamesgamesgames.slug'
-      AND record->>'ref' IS NOT NULL
-      AND record->>'slug' IS NOT NULL
+    SELECT uri, slug FROM slugs
   `;
   const slugsByRef = new Map<string, string>();
   for (const row of slugRows) {
-    slugsByRef.set(row.ref, row.slug);
+    slugsByRef.set(row.uri, row.slug);
   }
   console.log(`Loaded ${slugsByRef.size} slugs.`);
 
@@ -496,6 +490,74 @@ async function backfill(): Promise<void> {
   }
 
   console.log(`\nBackfill complete. ${totalIndexed} documents indexed.`);
+
+  // -------------------------------------------------------------------------
+  // Remove stale documents from Meilisearch that no longer exist in Postgres
+  // -------------------------------------------------------------------------
+
+  console.log("\nBuilding set of valid document IDs from Postgres...");
+  const validIds = new Set<string>();
+
+  for (const collection of collections) {
+    let offset = 0;
+    while (true) {
+      const rows = await sql`
+        SELECT uri
+        FROM records
+        WHERE collection = ${collection}
+        ORDER BY uri
+        LIMIT ${BATCH_SIZE}
+        OFFSET ${offset}
+      `;
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        validIds.add(toDocId(row.uri));
+      }
+      if (rows.length < BATCH_SIZE) break;
+      offset += BATCH_SIZE;
+    }
+  }
+
+  console.log(`  ${validIds.size} valid document IDs.`);
+
+  console.log("Fetching all document IDs from Meilisearch...");
+  const staleIds: string[] = [];
+  let meiliOffset = 0;
+  const meiliBatchSize = 1000;
+
+  while (true) {
+    const result = (await meili(
+      `/indexes/${INDEX}/documents?fields=id&limit=${meiliBatchSize}&offset=${meiliOffset}`
+    )) as { results: { id: string }[]; total: number };
+
+    for (const doc of result.results) {
+      if (!validIds.has(doc.id)) {
+        staleIds.push(doc.id);
+      }
+    }
+
+    meiliOffset += result.results.length;
+    if (meiliOffset >= result.total || result.results.length === 0) break;
+  }
+
+  console.log(`  Found ${staleIds.length} stale documents to remove.`);
+
+  if (staleIds.length > 0) {
+    // Delete in batches
+    for (let i = 0; i < staleIds.length; i += BATCH_SIZE) {
+      const batch = staleIds.slice(i, i + BATCH_SIZE);
+      await meiliTask(
+        `/indexes/${INDEX}/documents/delete-batch`,
+        "POST",
+        batch
+      );
+      console.log(
+        `  deleted batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} docs`
+      );
+    }
+    console.log(`  Removed ${staleIds.length} stale documents.`);
+  }
+
   await sql.end();
 }
 
