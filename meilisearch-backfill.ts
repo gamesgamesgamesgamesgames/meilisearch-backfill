@@ -216,12 +216,12 @@ function toDocId(uri: string): string {
 /**
  * Parse a releasedAt string into a numeric YYYYMMDD value for sorting.
  * Handles: "YYYY-MM-DD", "YYYY-MM", "YYYY-Q1".."YYYY-Q4", "YYYY".
- * Returns undefined for "TBD" or unparseable values.
+ * Returns undefined for unparseable values.
  */
 const Q_MONTH: { [key: string]: number } = { Q1: 1, Q2: 4, Q3: 7, Q4: 10 };
 
 function parseReleaseDate(s: unknown): number | undefined {
-  if (typeof s !== "string" || s === "TBD") return undefined;
+  if (typeof s !== "string") return undefined;
 
   // YYYY-Qn
   const qMatch = s.match(/^(\d{4})-?(Q[1-4])$/);
@@ -250,23 +250,53 @@ function parseReleaseDate(s: unknown): number | undefined {
   return undefined;
 }
 
-/** Find the earliest release date across all platforms/regions. */
-function getFirstReleaseDate(releases: unknown): number | undefined {
-  if (!Array.isArray(releases)) return undefined;
+// Sentinel values for sorting with firstReleaseDate:desc.
+// Neutral sits among current-era releases; cancelled sinks to the bottom.
+function neutralDate(): number {
+  const now = new Date();
+  return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+}
+const CANCELLED_DATE = 10000101; // far past — deprioritised
+
+const CANCELLED_STATUSES = new Set(["cancelled", "offline"]);
+
+/**
+ * Find the earliest release date across all platforms/regions.
+ *
+ * - Concrete dates (past or future) are parsed as-is — future dates naturally
+ *   rank high with desc ordering
+ * - If all release entries are cancelled → CANCELLED_DATE (deprioritised)
+ * - TBD / no parseable date → neutral (today's date, ranks among current releases)
+ */
+function getFirstReleaseDate(releases: unknown): number {
+  if (!Array.isArray(releases) || releases.length === 0) return neutralDate();
+
   let earliest: number | undefined;
+  let hasAnyEntry = false;
+  let allCancelled = true;
+
   for (const rel of releases) {
     if (!rel || typeof rel !== "object") continue;
     const releaseDates = (rel as Record).releaseDates;
     if (!Array.isArray(releaseDates)) continue;
     for (const rd of releaseDates) {
       if (!rd || typeof rd !== "object") continue;
+      hasAnyEntry = true;
+
+      const status = (rd as Record).status as string | undefined;
+      if (!status || !CANCELLED_STATUSES.has(status)) {
+        allCancelled = false;
+      }
+
       const val = parseReleaseDate((rd as Record).releasedAt);
       if (val !== undefined && (earliest === undefined || val < earliest)) {
         earliest = val;
       }
     }
   }
-  return earliest;
+
+  if (hasAnyEntry && allCancelled) return CANCELLED_DATE;
+  return earliest ?? neutralDate();
 }
 
 const COLLECTIONS: { [collection: string]: string } = {
