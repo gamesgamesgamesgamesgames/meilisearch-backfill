@@ -186,6 +186,7 @@ async function configureIndex(): Promise<void> {
     "attribute",
     "sort",
     "exactness",
+    "applicationTypeRank:asc",
     "firstReleaseDate:desc",
   ]);
 
@@ -308,6 +309,18 @@ const COLLECTIONS: { [collection: string]: string } = {
   "games.gamesgamesgamesgames.org.profile": "orgProfile",
 };
 
+const APP_TYPE_RANK: Record<string, number> = {
+  game: 1, remake: 1, remaster: 1,
+  dlc: 2, expansion: 2,
+  standaloneExpansion: 3, expandedGame: 3,
+  episode: 4, season: 4,
+  update: 5,
+  port: 6,
+  mod: 7,
+  fork: 8,
+  addon: 9, pack: 9, bundle: 9,
+};
+
 function mapRecord(
   uri: string,
   did: string,
@@ -346,6 +359,7 @@ function mapRecord(
         alternativeNames: altNames.length > 0 ? altNames : undefined,
         multiplayerModes: record.multiplayerModes,
         applicationType: record.applicationType,
+        applicationTypeRank: APP_TYPE_RANK[record.applicationType as string] ?? 99,
         publishedAt: record.publishedAt,
         firstReleaseDate: getFirstReleaseDate(record.releases),
         media: record.media,
