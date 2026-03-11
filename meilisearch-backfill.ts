@@ -349,7 +349,6 @@ function mapRecord(
         publishedAt: record.publishedAt,
         firstReleaseDate: getFirstReleaseDate(record.releases),
         media: record.media,
-        collections: Array.isArray(record.collections) ? record.collections : undefined,
         ...(slug ? { slug } : {}),
       };
     }
@@ -491,6 +490,83 @@ async function backfill(): Promise<void> {
   }
 
   console.log(`\nBackfill complete. ${totalIndexed} documents indexed.`);
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Populate `collections` on game documents from collection records
+  // -------------------------------------------------------------------------
+
+  console.log("\nPhase 2: Populating collections on game documents...");
+
+  // Read all collection records that have a `games` array
+  const gameToCollections = new Map<string, string[]>();
+  let collOffset = 0;
+
+  while (true) {
+    const rows = await sql`
+      SELECT uri, record
+      FROM records
+      WHERE collection = 'games.gamesgamesgamesgames.collection'
+      ORDER BY uri
+      LIMIT ${BATCH_SIZE}
+      OFFSET ${collOffset}
+    `;
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      const rec = row.record as Record;
+      const games = rec.games as string[] | undefined;
+      if (!Array.isArray(games) || games.length === 0) continue;
+
+      for (const gameUri of games) {
+        if (typeof gameUri !== "string") continue;
+        if (!gameToCollections.has(gameUri)) {
+          gameToCollections.set(gameUri, []);
+        }
+        gameToCollections.get(gameUri)!.push(row.uri);
+      }
+    }
+
+    if (rows.length < BATCH_SIZE) break;
+    collOffset += BATCH_SIZE;
+  }
+
+  console.log(`  Found ${gameToCollections.size} games with collection memberships.`);
+
+  // Update game documents in Meilisearch with their collections
+  if (gameToCollections.size > 0) {
+    const updates: Record[] = [];
+    let updatedCount = 0;
+
+    for (const [gameUri, collectionUris] of gameToCollections) {
+      updates.push({
+        id: toDocId(gameUri),
+        collections: collectionUris,
+      });
+
+      if (updates.length >= BATCH_SIZE) {
+        await meiliTask(
+          `/indexes/${INDEX}/documents?primaryKey=id`,
+          "PUT",
+          updates
+        );
+        updatedCount += updates.length;
+        console.log(`  updated ${updatedCount} game documents with collections`);
+        updates.length = 0;
+      }
+    }
+
+    if (updates.length > 0) {
+      await meiliTask(
+        `/indexes/${INDEX}/documents?primaryKey=id`,
+        "PUT",
+        updates
+      );
+      updatedCount += updates.length;
+    }
+
+    console.log(`  Phase 2 complete: ${updatedCount} game documents updated with collections.`);
+  }
 
   // -------------------------------------------------------------------------
   // Remove stale documents from Meilisearch that no longer exist in Postgres
