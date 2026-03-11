@@ -118,6 +118,7 @@ async function configureIndex(): Promise<void> {
     "playerPerspectives",
     "applicationType",
     "cancelled",
+    "ageRatings",
     "category",
     "collectionType",
     "country",
@@ -350,6 +351,14 @@ function mapRecord(
           }
         }
       }
+      const ageRatings: string[] = [];
+      if (Array.isArray(record.ageRatings)) {
+        for (const ar of record.ageRatings) {
+          if (ar && typeof ar === "object" && (ar as Record).organization && (ar as Record).rating) {
+            ageRatings.push(`${(ar as Record).organization}:${(ar as Record).rating}`);
+          }
+        }
+      }
       const releaseInfo = getReleaseInfo(record.releases);
       return {
         id: toDocId(uri),
@@ -372,6 +381,7 @@ function mapRecord(
         publishedAt: record.publishedAt,
         firstReleaseDate: releaseInfo.firstReleaseDate,
         media: record.media,
+        ageRatings: ageRatings.length > 0 ? ageRatings : [],
         ...(slug ? { slug } : {}),
       };
     }
