@@ -349,6 +349,7 @@ function mapRecord(
         publishedAt: record.publishedAt,
         firstReleaseDate: getFirstReleaseDate(record.releases),
         media: record.media,
+        collections: Array.isArray(record.collections) ? record.collections : undefined,
         ...(slug ? { slug } : {}),
       };
     }
