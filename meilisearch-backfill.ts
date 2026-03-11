@@ -117,6 +117,7 @@ async function configureIndex(): Promise<void> {
     "modes",
     "playerPerspectives",
     "applicationType",
+    "cancelled",
     "category",
     "collectionType",
     "country",
@@ -262,15 +263,18 @@ const CANCELLED_DATE = 10000101; // far past — deprioritised
 const CANCELLED_STATUSES = new Set(["cancelled", "offline"]);
 
 /**
- * Find the earliest release date across all platforms/regions.
+ * Find the earliest release date across all platforms/regions,
+ * and whether the game is cancelled.
  *
  * - Concrete dates (past or future) are parsed as-is — future dates naturally
  *   rank high with desc ordering
  * - If all release entries are cancelled → CANCELLED_DATE (deprioritised)
  * - TBD / no parseable date → neutral (today's date, ranks among current releases)
  */
-function getFirstReleaseDate(releases: unknown): number {
-  if (!Array.isArray(releases) || releases.length === 0) return neutralDate();
+function getReleaseInfo(releases: unknown): { firstReleaseDate: number; cancelled: boolean } {
+  if (!Array.isArray(releases) || releases.length === 0) {
+    return { firstReleaseDate: neutralDate(), cancelled: false };
+  }
 
   let earliest: number | undefined;
   let hasAnyEntry = false;
@@ -296,8 +300,11 @@ function getFirstReleaseDate(releases: unknown): number {
     }
   }
 
-  if (hasAnyEntry && allCancelled) return CANCELLED_DATE;
-  return earliest ?? neutralDate();
+  const cancelled = hasAnyEntry && allCancelled;
+  return {
+    firstReleaseDate: cancelled ? CANCELLED_DATE : (earliest ?? neutralDate()),
+    cancelled,
+  };
 }
 
 const COLLECTIONS: { [collection: string]: string } = {
@@ -343,6 +350,7 @@ function mapRecord(
           }
         }
       }
+      const releaseInfo = getReleaseInfo(record.releases);
       return {
         id: toDocId(uri),
         type: "game",
@@ -360,8 +368,9 @@ function mapRecord(
         multiplayerModes: record.multiplayerModes,
         applicationType: record.applicationType,
         applicationTypeRank: APP_TYPE_RANK[record.applicationType as string] ?? 99,
+        cancelled: releaseInfo.cancelled,
         publishedAt: record.publishedAt,
-        firstReleaseDate: getFirstReleaseDate(record.releases),
+        firstReleaseDate: releaseInfo.firstReleaseDate,
         media: record.media,
         ...(slug ? { slug } : {}),
       };
