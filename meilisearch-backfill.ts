@@ -118,6 +118,7 @@ async function configureIndex(): Promise<void> {
     "playerPerspectives",
     "applicationType",
     "cancelled",
+    "firstReleaseDate",
     "ageRatings",
     "category",
     "collectionType",
@@ -682,7 +683,7 @@ async function main(): Promise<void> {
   console.log("");
 
   await configureIndex();
-  await backfill();
+  // await backfill();
 
   console.log("\nDone.");
 }
