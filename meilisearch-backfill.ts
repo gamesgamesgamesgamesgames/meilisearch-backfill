@@ -117,6 +117,7 @@ async function configureIndex(): Promise<void> {
     "modes",
     "playerPerspectives",
     "applicationType",
+    "uri",
     "cancelled",
     "firstReleaseDate",
     "ageRatings",
