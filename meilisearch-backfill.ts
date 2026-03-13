@@ -125,6 +125,16 @@ async function configureIndex(): Promise<void> {
     "collectionType",
     "country",
     "status",
+    "igdbId",
+    "steamId",
+    "gogId",
+    "epicGamesId",
+    "humbleBundleId",
+    "playStationId",
+    "xboxId",
+    "nintendoEshopId",
+    "appleAppStoreId",
+    "googlePlayId",
   ]);
 
   // Sortable attributes
@@ -385,6 +395,20 @@ function mapRecord(
         media: record.media,
         ageRatings: ageRatings.length > 0 ? ageRatings : [],
         ...(slug ? { slug } : {}),
+        ...(record.externalIds && typeof record.externalIds === "object"
+          ? {
+              igdbId: (record.externalIds as Record).igdb as string | undefined,
+              steamId: (record.externalIds as Record).steam as string | undefined,
+              gogId: (record.externalIds as Record).gog as string | undefined,
+              epicGamesId: (record.externalIds as Record).epicGames as string | undefined,
+              humbleBundleId: (record.externalIds as Record).humbleBundle as string | undefined,
+              playStationId: (record.externalIds as Record).playStation as string | undefined,
+              xboxId: (record.externalIds as Record).xbox as string | undefined,
+              nintendoEshopId: (record.externalIds as Record).nintendoEshop as string | undefined,
+              appleAppStoreId: (record.externalIds as Record).appleAppStore as string | undefined,
+              googlePlayId: (record.externalIds as Record).googlePlay as string | undefined,
+            }
+          : {}),
       };
     }
     case "platform":
