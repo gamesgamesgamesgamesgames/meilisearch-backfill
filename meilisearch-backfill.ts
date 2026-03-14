@@ -11,6 +11,7 @@
  *   DATABASE_URL          — Postgres connection string
  *   MEILISEARCH_URL       — e.g. http://meilisearch.railway.internal:7700
  *   MEILISEARCH_API_KEY   — Admin API key
+ *   OPENAI_API_KEY        — OpenAI API key for embedding generation (optional)
  */
 
 import postgres from "postgres";
@@ -213,6 +214,28 @@ async function configureIndex(): Promise<void> {
     },
     disableOnAttributes: ["genres", "themes", "modes", "applicationType"],
   });
+
+  // Embedder for vector similarity (similar games)
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    console.log("Configuring game-similarity embedder...");
+    await meiliTask(`/indexes/${INDEX}/settings/embedders`, "PATCH", {
+      "game-similarity": {
+        source: "openAi",
+        model: "text-embedding-3-small",
+        apiKey: openaiKey,
+        documentTemplate: [
+          "A video game called '{{doc.name}}'.",
+          "{% for field in fields %}{% if field.name == 'genres' %}Genres: {% for g in field.value %}{{ g }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
+          "{% for field in fields %}{% if field.name == 'themes' %}Themes: {% for t in field.value %}{{ t }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
+          "{% for field in fields %}{% if field.name == 'summary' %}{{ field.value }}{% endif %}{% endfor %}",
+        ].join("\n"),
+      },
+    });
+    console.log("Embedder configured.");
+  } else {
+    console.log("Skipping embedder configuration (no OPENAI_API_KEY).");
+  }
 
   console.log("Index settings configured.");
 }
