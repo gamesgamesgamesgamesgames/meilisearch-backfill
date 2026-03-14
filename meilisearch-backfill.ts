@@ -61,7 +61,9 @@ async function meili(
   return res.json();
 }
 
-async function waitForTask(taskUid: number): Promise<void> {
+async function waitForTask(taskUid: number, label?: string): Promise<void> {
+  const start = Date.now();
+  let lastLog = 0;
   while (true) {
     const task = (await meili(`/tasks/${taskUid}`)) as {
       status: string;
@@ -73,6 +75,14 @@ async function waitForTask(taskUid: number): Promise<void> {
         `Meilisearch task ${taskUid} failed: ${task.error?.message}`
       );
     }
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    if (elapsed - lastLog >= 30) {
+      lastLog = elapsed;
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const time = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      console.log(`  ⏳ ${label ?? `task ${taskUid}`}: still processing... (${time} elapsed)`);
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
 }
@@ -80,10 +90,11 @@ async function waitForTask(taskUid: number): Promise<void> {
 async function meiliTask(
   path: string,
   method: string,
-  body?: unknown
+  body?: unknown,
+  label?: string
 ): Promise<void> {
   const result = (await meili(path, method, body)) as { taskUid: number };
-  await waitForTask(result.taskUid);
+  await waitForTask(result.taskUid, label);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +120,7 @@ async function configureIndex(): Promise<void> {
   }
 
   // Filterable attributes — enables faceted search and filter queries
+  console.log("  Setting filterable attributes...");
   await meiliTask(`/indexes/${INDEX}/settings/filterable-attributes`, "PUT", [
     "type",
     "profileType",
@@ -136,17 +148,19 @@ async function configureIndex(): Promise<void> {
     "nintendoEshopId",
     "appleAppStoreId",
     "googlePlayId",
-  ]);
+  ], "filterable attributes");
 
   // Sortable attributes
+  console.log("  Setting sortable attributes...");
   await meiliTask(`/indexes/${INDEX}/settings/sortable-attributes`, "PUT", [
     "name",
     "displayName",
     "publishedAt",
     "firstReleaseDate",
-  ]);
+  ], "sortable attributes");
 
   // Searchable attributes — priority order (most important first)
+  console.log("  Setting searchable attributes...");
   await meiliTask(`/indexes/${INDEX}/settings/searchable-attributes`, "PUT", [
     "name",
     "displayName",
@@ -157,9 +171,10 @@ async function configureIndex(): Promise<void> {
     "description",
     "keywords",
     "storyline",
-  ]);
+  ], "searchable attributes");
 
   // Synonyms — common gaming abbreviations
+  console.log("  Setting synonyms...");
   await meiliTask(`/indexes/${INDEX}/settings/synonyms`, "PUT", {
     rpg: ["role-playing game", "role playing game"],
     "role-playing game": ["rpg"],
@@ -191,9 +206,10 @@ async function configureIndex(): Promise<void> {
     shmup: ["shoot em up", "shoot-em-up"],
     sim: ["simulator", "simulation"],
     platformer: ["platform"],
-  });
+  }, "synonyms");
 
   // Ranking rules — boost exact name matches, then prefer newer games
+  console.log("  Setting ranking rules...");
   await meiliTask(`/indexes/${INDEX}/settings/ranking-rules`, "PUT", [
     "words",
     "typo",
@@ -203,9 +219,10 @@ async function configureIndex(): Promise<void> {
     "exactness",
     "applicationTypeRank:asc",
     "firstReleaseDate:desc",
-  ]);
+  ], "ranking rules");
 
   // Typo tolerance — tuned for game names
+  console.log("  Setting typo tolerance...");
   await meiliTask(`/indexes/${INDEX}/settings/typo-tolerance`, "PATCH", {
     enabled: true,
     minWordSizeForTypos: {
@@ -213,7 +230,7 @@ async function configureIndex(): Promise<void> {
       twoTypos: 8,
     },
     disableOnAttributes: ["genres", "themes", "modes", "applicationType"],
-  });
+  }, "typo tolerance");
 
   // Embedder for vector similarity (similar games)
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -225,14 +242,14 @@ async function configureIndex(): Promise<void> {
         model: "text-embedding-3-small",
         apiKey: openaiKey,
         documentTemplate: [
-          "A video game called '{{doc.name}}'.",
+          "{% for field in fields %}{% if field.name == 'name' %}A video game called '{{ field.value }}'.{% endif %}{% endfor %}",
           "{% for field in fields %}{% if field.name == 'genres' %}Genres: {% for g in field.value %}{{ g }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
           "{% for field in fields %}{% if field.name == 'themes' %}Themes: {% for t in field.value %}{{ t }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
           "{% for field in fields %}{% if field.name == 'summary' %}{{ field.value }}{% endif %}{% endfor %}",
         ].join("\n"),
       },
-    });
-    console.log("Embedder configured.");
+    }, "game-similarity embedder");
+    console.log("  Embedder configured.");
   } else {
     console.log("Skipping embedder configuration (no OPENAI_API_KEY).");
   }
