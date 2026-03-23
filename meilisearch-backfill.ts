@@ -11,7 +11,7 @@
  *   DATABASE_URL          — Postgres connection string
  *   MEILISEARCH_URL       — e.g. http://meilisearch.railway.internal:7700
  *   MEILISEARCH_API_KEY   — Admin API key
- *   OPENAI_API_KEY        — OpenAI API key for embedding generation (optional)
+ *   OPENAI_API_KEY        — OpenAI API key for embedding generation (required)
  */
 
 import postgres from "postgres";
@@ -232,27 +232,31 @@ async function configureIndex(): Promise<void> {
     disableOnAttributes: ["genres", "themes", "modes", "applicationType"],
   }, "typo tolerance");
 
-  // Embedder for vector similarity (similar games)
+  // Embedder for hybrid semantic search (required)
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    console.log("Configuring game-similarity embedder...");
-    await meiliTask(`/indexes/${INDEX}/settings/embedders`, "PATCH", {
-      "game-similarity": {
-        source: "openAi",
-        model: "text-embedding-3-small",
-        apiKey: openaiKey,
-        documentTemplate: [
-          "{% for field in fields %}{% if field.name == 'name' %}A video game called '{{ field.value }}'.{% endif %}{% endfor %}",
-          "{% for field in fields %}{% if field.name == 'genres' %}Genres: {% for g in field.value %}{{ g }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
-          "{% for field in fields %}{% if field.name == 'themes' %}Themes: {% for t in field.value %}{{ t }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
-          "{% for field in fields %}{% if field.name == 'summary' %}{{ field.value }}{% endif %}{% endfor %}",
-        ].join("\n"),
-      },
-    }, "game-similarity embedder");
-    console.log("  Embedder configured.");
-  } else {
-    console.log("Skipping embedder configuration (no OPENAI_API_KEY).");
+  if (!openaiKey) {
+    console.error("Missing required env var: OPENAI_API_KEY");
+    process.exit(1);
   }
+  console.log("Configuring game-similarity embedder...");
+  await meiliTask(`/indexes/${INDEX}/settings/embedders`, "PATCH", {
+    "game-similarity": {
+      source: "openAi",
+      model: "text-embedding-3-small",
+      apiKey: openaiKey,
+      documentTemplate: [
+        "{% for field in fields %}{% if field.name == 'name' %}A video game called '{{ field.value }}'.{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'genres' %}Genres: {% for g in field.value %}{{ g }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'themes' %}Themes: {% for t in field.value %}{{ t }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'ageRatingDescriptions' %}{{ field.value }}{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'releaseDecade' %}Released {{ field.value }}.{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'summary' %}{{ field.value }}{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'keywords' %}Keywords: {% for k in field.value %}{{ k }}{% unless forloop.last %}, {% endunless %}{% endfor %}.{% endif %}{% endfor %}",
+        "{% for field in fields %}{% if field.name == 'storyline' %}{{ field.value }}{% endif %}{% endfor %}",
+      ].join("\n"),
+    },
+  }, "game-similarity embedder");
+  console.log("  Embedder configured.");
 
   console.log("Index settings configured.");
 }
@@ -381,6 +385,75 @@ const APP_TYPE_RANK: Record<string, number> = {
   addon: 9, pack: 9, bundle: 9,
 };
 
+// Rating-to-description mapping for embedder template.
+// Source of truth: docs/superpowers/specs/2026-03-22-semantic-search-design.md
+// Duplicate exists in: lua/games/gamesgamesgamesgames/game.lua
+const RATING_DESCRIPTIONS: { [key: string]: string } = {
+  "esrb:E": "Rated ESRB E for Everyone (ages 0+, North America)",
+  "esrb:E10": "Rated ESRB E10+ for Everyone 10+ (ages 10+, North America)",
+  "esrb:T": "Rated ESRB T for Teen (ages 13+, North America)",
+  "esrb:M": "Rated ESRB M for Mature (ages 17+, North America)",
+  "esrb:AO": "Rated ESRB AO for Adults Only (ages 18+, North America)",
+  "pegi:Three": "Rated PEGI 3 (ages 3+, Europe)",
+  "pegi:Seven": "Rated PEGI 7 (ages 7+, Europe)",
+  "pegi:Twelve": "Rated PEGI 12 (ages 12+, Europe)",
+  "pegi:Sixteen": "Rated PEGI 16 (ages 16+, Europe)",
+  "pegi:Eighteen": "Rated PEGI 18 (ages 18+, Europe)",
+  "cero:A": "Rated CERO A for All Ages (ages 0+, Japan)",
+  "cero:B": "Rated CERO B (ages 12+, Japan)",
+  "cero:C": "Rated CERO C (ages 15+, Japan)",
+  "cero:D": "Rated CERO D (ages 17+, Japan)",
+  "cero:Z": "Rated CERO Z (ages 18+, Japan)",
+  "usk:0": "Rated USK 0 (ages 0+, Germany)",
+  "usk:6": "Rated USK 6 (ages 6+, Germany)",
+  "usk:12": "Rated USK 12 (ages 12+, Germany)",
+  "usk:16": "Rated USK 16 (ages 16+, Germany)",
+  "usk:18": "Rated USK 18 (ages 18+, Germany)",
+  "grac:All": "Rated GRAC All (ages 0+, South Korea)",
+  "gcrb:All": "Rated GRAC All (ages 0+, South Korea)",
+  "grac:Twelve": "Rated GRAC 12 (ages 12+, South Korea)",
+  "gcrb:Twelve": "Rated GRAC 12 (ages 12+, South Korea)",
+  "grac:Fifteen": "Rated GRAC 15 (ages 15+, South Korea)",
+  "gcrb:Fifteen": "Rated GRAC 15 (ages 15+, South Korea)",
+  "grac:Eighteen": "Rated GRAC 18 (ages 18+, South Korea)",
+  "gcrb:Eighteen": "Rated GRAC 18 (ages 18+, South Korea)",
+  "classInd:L": "Rated ClassInd L for General (ages 0+, Brazil)",
+  "classInd:10": "Rated ClassInd 10 (ages 10+, Brazil)",
+  "classInd:12": "Rated ClassInd 12 (ages 12+, Brazil)",
+  "classInd:14": "Rated ClassInd 14 (ages 14+, Brazil)",
+  "classInd:16": "Rated ClassInd 16 (ages 16+, Brazil)",
+  "classInd:18": "Rated ClassInd 18 (ages 18+, Brazil)",
+  "acb:G": "Rated ACB G for General (ages 0+, Australia)",
+  "acb:PG": "Rated ACB PG for Parental Guidance (ages 0+, Australia)",
+  "acb:M": "Rated ACB M for Mature (ages 15+, Australia)",
+  "acb:MA15": "Rated ACB MA15+ (ages 15+, Australia)",
+  "acb:R18": "Rated ACB R18+ (ages 18+, Australia)",
+  "acb:X18": "Rated ACB X18+ (ages 18+, Australia)",
+};
+
+function buildAgeRatingDescriptions(ageRatings: string[]): string | undefined {
+  if (ageRatings.length === 0) return undefined;
+  const parts = ageRatings
+    .map((key) => RATING_DESCRIPTIONS[key])
+    .filter(Boolean);
+  if (parts.length === 0) return undefined;
+  return parts.join(". ") + ".";
+}
+
+function deriveReleaseYear(firstReleaseDate: number): number | undefined {
+  if (firstReleaseDate === CANCELLED_DATE) return undefined;
+  return Math.floor(firstReleaseDate / 10000);
+}
+
+function deriveReleaseDecade(releaseYear: number): string {
+  const decadeStart = releaseYear - (releaseYear % 10);
+  // Century boundary: 2000 -> "2000s", not "0s"
+  const decadeShort = decadeStart % 100 === 0 ? String(decadeStart) : String(decadeStart % 100);
+  const yearInDecade = releaseYear % 10;
+  const position = yearInDecade <= 3 ? "early" : yearInDecade <= 6 ? "mid" : "late";
+  return `in the ${position} ${decadeStart}s (${decadeShort}s)`;
+}
+
 function mapRecord(
   uri: string,
   did: string,
@@ -412,6 +485,9 @@ function mapRecord(
         }
       }
       const releaseInfo = getReleaseInfo(record.releases);
+      const ageRatingDescs = buildAgeRatingDescriptions(ageRatings);
+      const releaseYear = deriveReleaseYear(releaseInfo.firstReleaseDate);
+      const releaseDecadeStr = releaseYear !== undefined ? deriveReleaseDecade(releaseYear) : undefined;
       return {
         id: toDocId(uri),
         type: "game",
@@ -434,6 +510,9 @@ function mapRecord(
         firstReleaseDate: releaseInfo.firstReleaseDate,
         media: record.media,
         ageRatings: ageRatings.length > 0 ? ageRatings : [],
+        ...(ageRatingDescs ? { ageRatingDescriptions: ageRatingDescs } : {}),
+        ...(releaseYear !== undefined ? { releaseYear } : {}),
+        ...(releaseDecadeStr ? { releaseDecade: releaseDecadeStr } : {}),
         ...(slug ? { slug } : {}),
         ...(record.externalIds && typeof record.externalIds === "object"
           ? {
